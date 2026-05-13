@@ -32,6 +32,12 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      - name: Capture actual checked-out revision
+        id: revision
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ inputs.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Go bootstrap (go1.26)
         uses: actions/setup-go@v5
         with:
@@ -84,7 +90,7 @@ jobs:
           body: |
             ## ${{ inputs.version }}
 
-            Modified Go toolchain built from commit `${{ github.sha }}` on branch `${{ github.ref_name }}`.
+            Modified Go toolchain built from commit `${{ steps.revision.outputs.sha }}` (`${{ steps.revision.outputs.ref }}`).
 
             ### Download
 
