@@ -8,23 +8,20 @@ on:
         required: false
         default: ''
       version:
-        description: 'Release version tag (e.g. go1.26.0-btwiuse.1)'
+        description: 'Release version tag (e.g. go1.27.0-btwiuse.1)'
         required: true
-        default: 'go1.26.0-btwiuse.1'
-      goos:
-        description: 'Target OS (e.g. linux, darwin, windows)'
-        required: false
-        default: 'linux'
-      goarch:
-        description: 'Target architecture (e.g. amd64, arm64)'
-        required: false
-        default: 'amd64'
+        default: 'go1.27.0-btwiuse.1'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
 
     steps:
       - name: Checkout repository
@@ -33,10 +30,9 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Capture actual checked-out revision
-        id: revision
         run: |
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "ref=${{ inputs.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" > revision.txt
+          echo "ref=${{ inputs.ref || github.ref_name }}" >> revision.txt
 
       - name: Set up Go bootstrap (go1.26)
         uses: actions/setup-go@v5
@@ -47,40 +43,80 @@ jobs:
       - name: Set GOROOT_BOOTSTRAP
         run: echo "GOROOT_BOOTSTRAP=$(go env GOROOT)" >> "$GITHUB_ENV"
 
-      - name: Build Go toolchain
+      - name: Create GOROOT VERSION file
+        run: |
+          echo "${{ inputs.version }}" > VERSION
+          echo "time $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> VERSION
+
+      - name: Build and package Go toolchain
         env:
-          GOOS: ${{ inputs.goos }}
-          GOARCH: ${{ inputs.goarch }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           cd src
-          ./make.bash
+          ./make.bash -distpack
 
-      - name: Package toolchain
-        id: package
-        env:
-          VERSION: ${{ inputs.version }}
-          GOOS: ${{ inputs.goos }}
-          GOARCH: ${{ inputs.goarch }}
+      - name: Generate Checksums
         run: |
-          TARNAME="${VERSION}.${GOOS}-${GOARCH}.tar.gz"
-          TARPATH="${RUNNER_TEMP}/${TARNAME}"
+          cd pkg/distpack
+          PREFIX="${{ inputs.version }}.${{ matrix.goos }}-${{ matrix.goarch }}"
+          for f in ${PREFIX}.*; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> ../../checksums.txt
+            fi
+          done
 
-          # Package the repository as 'go/' to match the official release layout.
-          # Exclude version-control and CI metadata that are not part of the distribution.
-          tar -czf "${TARPATH}" \
-            --exclude='.git' \
-            --exclude='.github' \
-            --transform 's|^\.|go|' \
-            -C "$GITHUB_WORKSPACE" .
-
-          echo "tarname=${TARNAME}" >> "$GITHUB_OUTPUT"
-          echo "tarpath=${TARPATH}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute SHA256 checksum
-        id: checksum
+      - name: Prepare staging directory
         run: |
-          SHA256=$(sha256sum "${{ steps.package.outputs.tarpath }}" | awk '{print $1}')
-          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          mkdir staging
+          cp pkg/distpack/${{ inputs.version }}.${{ matrix.goos }}-${{ matrix.goarch }}.* staging/
+          cp checksums.txt revision.txt staging/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: staging/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Load Revision Info
+        id: revision
+        run: |
+          # Read from linux-amd64 folder (which must exist)
+          SHA=$(grep sha artifacts/dist-linux-amd64/revision.txt | cut -d= -f2)
+          REF=$(grep ref artifacts/dist-linux-amd64/revision.txt | cut -d= -f2)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Unified Checksums Table
+        id: checksums
+        run: |
+          echo "checksum_table<<EOF" >> "$GITHUB_OUTPUT"
+          echo "| File | SHA256 |" >> "$GITHUB_OUTPUT"
+          echo "|------|--------|" >> "$GITHUB_OUTPUT"
+          cat artifacts/dist-*/checksums.txt | while read -r sha file; do
+            name=$(basename "$file")
+            echo "| \`$name\` | \`$sha\` |" >> "$GITHUB_OUTPUT"
+          done
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Gather Release Assets
+        run: |
+          mkdir release_assets
+          # Copy tar.gz and zip files from all dist folders to release_assets
+          find artifacts/ -name "*.tar.gz" -exec cp {} release_assets/ \;
+          find artifacts/ -name "*.zip" -exec cp {} release_assets/ \;
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -94,16 +130,19 @@ jobs:
 
             ### Download
 
-            | File | SHA256 |
-            |------|--------|
-            | `${{ steps.package.outputs.tarname }}` | `${{ steps.checksum.outputs.sha256 }}` |
+            ${{ steps.checksums.outputs.checksum_table }}
 
-            ### Usage
+            ### Usage (Linux/macOS)
 
             ```bash
-            tar -C /usr/local -xzf ${{ steps.package.outputs.tarname }}
-            export PATH="/usr/local/go/bin:$PATH"
+            # For Linux amd64:
+            tar -C /usr/local -xzf ${{ inputs.version }}.linux-amd64.tar.gz
+
+            # For macOS arm64:
+            tar -C /usr/local -xzf ${{ inputs.version }}.darwin-arm64.tar.gz
+
+            export PATH="/usr/local/go/bin:\$PATH"
             ```
-          files: ${{ steps.package.outputs.tarpath }}
+          files: release_assets/*
           draft: false
           prerelease: false
