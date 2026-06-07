@@ -530,12 +530,13 @@ func (c *Cmd) argv() []string {
 
 func (c *Cmd) childStdin() (*os.File, error) {
 	if c.Stdin == nil {
-		f, err := os.Open(os.DevNull)
+		pr, pw, err := os.Pipe()
 		if err != nil {
 			return nil, err
 		}
-		c.childIOFiles = append(c.childIOFiles, f)
-		return f, nil
+		pw.Close()
+		c.childIOFiles = append(c.childIOFiles, pr)
+		return pr, nil
 	}
 
 	if f, ok := c.Stdin.(*os.File); ok {
@@ -576,15 +577,21 @@ func (c *Cmd) childStderr(childStdout *os.File) (*os.File, error) {
 // writerDescriptor returns an os.File to which the child process
 // can write to send data to w.
 //
-// If w is nil, writerDescriptor returns a File that writes to os.DevNull.
+// If w is nil, writerDescriptor returns a File whose writes are discarded.
 func (c *Cmd) writerDescriptor(w io.Writer) (*os.File, error) {
 	if w == nil {
-		f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		pr, pw, err := os.Pipe()
 		if err != nil {
 			return nil, err
 		}
-		c.childIOFiles = append(c.childIOFiles, f)
-		return f, nil
+		c.childIOFiles = append(c.childIOFiles, pw)
+		c.parentIOPipes = append(c.parentIOPipes, pr)
+		c.goroutine = append(c.goroutine, func() error {
+			_, err := io.Copy(io.Discard, pr)
+			pr.Close()
+			return err
+		})
+		return pw, nil
 	}
 
 	if f, ok := w.(*os.File); ok {
