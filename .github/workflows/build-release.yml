@@ -36,6 +36,20 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" > revision.txt
           echo "ref=${{ inputs.ref || github.ref_name }}" >> revision.txt
 
+      - name: Prune non-essential source files
+        run: |
+          # Remove large directories not needed for building the toolchain
+          # (mirrors gozip's SkipDir logic: api, doc, test)
+          rm -rf api/ doc/ test/
+          # Remove misc/ subdirs except misc/wasm/ (contains wasm_exec.html needed at runtime)
+          find misc/ -mindepth 1 -maxdepth 1 -not -name 'wasm' -exec rm -rf {} +
+          # Remove documentation files throughout the source tree (safe — not used by compiler)
+          find . -name "*.md" -delete
+          find . -name "*.html" -not -path "*/misc/wasm/*" -delete
+          # Remove top-level build scripts for other platforms (keep src/make.bash etc.)
+          find . -maxdepth 1 -name "*.bat" -delete
+          find . -maxdepth 1 -name "*.rc" -delete
+
       - name: Set up Go bootstrap (go1.26)
         uses: actions/setup-go@v5
         with:
