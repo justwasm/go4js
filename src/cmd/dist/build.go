@@ -271,7 +271,9 @@ func xinit() {
 	}
 	xatexit(rmworkdir)
 
-	tooldir = pathf("%s/pkg/tool/%s_%s", goroot, gohostos, gohostarch)
+	if tooldir = os.Getenv("GOTOOLDIR"); tooldir == "" {
+		tooldir = pathf("%s/pkg/tool/%s_%s", goroot, gohostos, gohostarch)
+	}
 
 	goversion := findgoversion()
 	isRelease = (strings.HasPrefix(goversion, "release.") || strings.HasPrefix(goversion, "go")) &&
