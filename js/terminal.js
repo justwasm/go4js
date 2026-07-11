@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { ImageAddon } from '@xterm/addon-image';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { CursorTrailAddon } from 'xterm-addon-cursor-trail';
 import { listenColorScheme } from './colorScheme.js';
 
 const fontScale = 0.85
@@ -20,6 +21,7 @@ export function newTerminal(elem) {
   term.loadAddon(imageAddon)
   term.loadAddon(new WebLinksAddon())
   term.loadAddon(new ClipboardAddon())
+  term.loadAddon(new CursorTrailAddon())
 
   const dark = "rgb(33, 33, 33)"
   const light = "white"
