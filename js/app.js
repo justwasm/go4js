@@ -2,7 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { html } from './html.js';
 
-import { install, run, observeGoDownloadProgress } from './hackpad.js';
+import { install, run } from './hackpad.js';
 import { newEditor, setupMonaco } from './editor.js';
 import { newTerminal } from './terminal.js';
 import { Compat } from './compat.js';
@@ -13,7 +13,15 @@ function App() {
   const [percentage, setPercentage] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   React.useEffect(() => {
-    observeGoDownloadProgress(setPercentage)
+    // Hyperbolic progress: 100 * (1 - 1/(1 + t/T))
+    // Fast at start, slows down, never reaches 100 until actually done.
+    const T = 2000; // reaches 50% at 2s
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const t = Date.now() - start;
+      const pct = 100 * (1 - 1 / (1 + t / T));
+      setPercentage(Math.min(pct, 99.5));
+    }, 100);
 
     Promise.all([
       import('monaco-editor').then(monaco => {
@@ -26,8 +34,10 @@ function App() {
       install(CDN.editor, 'editor'),
       install(CDN.sh, 'sh'),
     ]).then(() => {
+      clearInterval(timer);
+      setPercentage(100);
       run('editor', '--editor=editor')
-      setLoading(false)
+      setTimeout(() => setLoading(false), 300);
     })
   }, [])
 

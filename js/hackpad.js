@@ -3,9 +3,6 @@ import { CDN } from './w9y.js';
 
 const Go = window.Go;
 
-let overlayProgress = 0;
-let progressListeners = [];
-
 async function init() {
   const startTime = new Date().getTime()
   const go = new Go();
@@ -83,11 +80,6 @@ export async function mkdirAll(path) {
   await initOnce
   const { fs } = window
   fs.mkdirSync(path, { recursive: true, mode: 0o755 })
-}
-
-export function observeGoDownloadProgress(callback) {
-  progressListeners.push(callback)
-  callback(overlayProgress)
 }
 
 const promisify = (fn) => (...args) => {
